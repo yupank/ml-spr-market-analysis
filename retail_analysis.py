@@ -6,6 +6,8 @@ from pyspark.ml.feature import StandardScaler
 from pyspark.ml.evaluation import ClusteringEvaluator
 from pyspark.ml.clustering import KMeans
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import seaborn as sns
 
 spark = SparkSession.builder.getOrCreate()
 # spark = SparkSession.builder.appName("pyspark ML app").config("spark.memory.offHeap.enabled","true").config("spark.memory.offHeap.size","10g").getOrCreate()
@@ -40,6 +42,8 @@ retail_df_freq = retail_df_2.groupBy('CustomerID').agg(count('InvoiceDate').alia
 # retail_df_freq.show(8)
 
 retail_df_3 = retail_df_2.join(retail_df_freq, on='CustomerID', how='inner')
+# data clearing - some rows have negative Quantity value - will be not included as errorneous
+retail_df_3 = retail_df_3.where((retail_df_3['Quantity'] >= 0) & (retail_df_3['Quantity'] < 50000))
 # retail_df_3.printSchema()
 
 # monetary value - total amount spend by each customer
@@ -86,4 +90,29 @@ def elbow_cluster_number(max_num):
 # plt.plot(range(2,10), errors)
 # plt.show()
 # print(f'optimal cluster number {opt_num} ')
-opt_num = 4
+opt_num = 3
+
+# making predictions
+model = KMeans(featuresCol='standardized',k=opt_num).fit(data_scale_output)
+predict_df = model.transform(data_scale_output)
+count_df = predict_df.groupBy('prediction').count().sort(asc('prediction')).show()
+avg_m_val_df = predict_df.groupBy('prediction').agg(mean('monetary_value').alias('mean_value')).sort(asc('prediction')).show()
+
+
+# viewing and saving results
+vis_df = predict_df.select('recency','frequency','monetary_value','prediction').toPandas()
+# 3D-view
+cluster_fig_3d = plt.figure(figsize=(12,10))
+ax3d = cluster_fig_3d.add_subplot(projection='3d')
+ax3d.scatter(vis_df.frequency, vis_df.recency, vis_df.monetary_value,
+             c=vis_df.prediction, depthshade=False)
+ax3d.set_ylabel('recency')
+ax3d.set_xlabel('frequency')
+ax3d.set_zlabel('monetary_value')
+plt.show()
+cluster_fig_3d.savefig(f'./results/online-retail/3d_clusters.svg',format='svg')
+# paired 2D-views
+fig, axs = plt.subplots(1, 3, squeeze=False, figsize=(15, 5))
+sns.set_theme(style='darkgrid')
+sns.set_context("paper")
+
